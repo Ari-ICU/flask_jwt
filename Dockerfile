@@ -8,7 +8,9 @@ RUN apk add --no-cache \
     python3-dev \
     musl-dev \
     linux-headers \
-    git
+    git \
+    bash \
+    tzdata
 
 WORKDIR /app
 
@@ -19,5 +21,9 @@ RUN pip install -r requirements.txt
 COPY . /app
 
 ENV FLASK_APP=run.py
+ENV FLASK_RUN_HOST=0.0.0.0
+ENV FLASK_RUN_PORT=8080
+
+EXPOSE 8080
 
 CMD ["flask", "run"]
