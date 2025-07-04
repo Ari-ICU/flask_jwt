@@ -32,3 +32,5 @@ class GlobalHandler:
     @jwt.revoked_token_loader
     def custom_revoked_token_response(jwt_header, jwt_payload):
         return jsonify({'message': 'Token has been revoked'}), 401
+    
+    

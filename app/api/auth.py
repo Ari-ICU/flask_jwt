@@ -26,7 +26,7 @@ token_model = auth_ns.model('Token', {
 @auth_ns.route('/register')
 class Register(Resource):
     @auth_ns.expect(register_model)
-    @limiter.limit('100/day;50/hour')
+    @limiter.limit('200/day;50/hour;10/minutes')
     @auth_ns.marshal_with(token_model, code=201)
     @auth_ns.doc(responses={201: 'User created', 400: 'Username exists'})
     def post(self):
@@ -41,22 +41,26 @@ class Register(Resource):
 @auth_ns.route('/login')
 class Login(Resource):
     @auth_ns.expect(login_model)
-    @limiter.limit('100/day;50/hour')
+    @limiter.limit('200/day;50/hour;10/minutes')
     @auth_ns.marshal_with(token_model)
-    @auth_ns.doc(responses={200: 'Success', 401: 'Invalid credentials'})
+    @auth_ns.doc(responses={200: 'Success', 401: 'Invalid credentials', 429: 'Too many login attempts'})
     def post(self):
         data = request.get_json()
-        user = UserService.authenticate(data['username'], data['password'])
-        if not user:
-            auth_ns.abort(401, 'Invalid credentials')
-        access_token, refresh_token = generate_tokens(user)
-        return {'access_token': access_token, 'refresh_token': refresh_token}
+        try:
+            user = UserService.authenticate(data['username'], data['password'])
+            if not user:
+                auth_ns.abort(401, 'Invalid credentials')
+            access_token, refresh_token = generate_tokens(user)
+            return {'access_token': access_token, 'refresh_token': refresh_token}
+        except ValueError as e:
+            # Handle too many attempts error
+            auth_ns.abort(429, str(e))
 
 @auth_ns.route('/refresh')
 class Refresh(Resource):
     @jwt_required(refresh=True)
     @auth_ns.marshal_with(token_model)
-    @limiter.limit('100/day;50/hour')
+    @limiter.limit('200/day;50/hour;10/minutes')
     @auth_ns.doc(security='Bearer', responses={200: 'Success', 401: 'Invalid refresh token'})
     def post(self):
         username = get_jwt_identity()

@@ -1,35 +1,52 @@
-import yaml
+# generate_swagger.py
 import os
+import yaml
 from dotenv import load_dotenv
 
-# Load environment variables from .env and .flaskenv
+# Load environment variables
 load_dotenv()
 
-# Define the Swagger/OpenAPI specification
+# Define Swagger/OpenAPI specification
 swagger_spec = {
-    'openapi': '3.0.3',
+    'openapi': '3.0.0',
     'info': {
-        'title': 'Flask JWT API with MongoDB',
-        'description': 'A scalable Flask API with JWT authentication, Swagger documentation, and MongoDB',
-        'version': '1.0.0'
+        'title': 'Flask JWT API with MongoDB and Redis',
+        'description': 'A scalable Flask API with JWT authentication, MongoDB, Redis, and Swagger documentation',
+        'version': '1.0.0',
+        'contact': {'email': 'support@api.example.com'},
+        'license': {'name': 'MIT', 'url': 'https://opensource.org/licenses/MIT'}
     },
     'servers': [
         {
-            'url': os.getenv('API_BASE_URL', 'http://localhost:5000'),
-            'description': 'Development server'
+            'url': '{protocol}://{host}{basePath}',
+            'description': 'Dynamic server configuration',
+            'variables': {
+                'protocol': {'default': 'http', 'enum': ['http', 'https']},
+                'host': {'default': os.getenv('API_HOST', 'localhost:5000')},
+                'basePath': {'default': os.getenv('API_BASE_PATH', '/api/v1')}
+            }
         }
     ],
     'components': {
         'securitySchemes': {
-            'Bearer': {
+            'BearerAuth': {
                 'type': 'http',
                 'scheme': 'bearer',
                 'bearerFormat': 'JWT',
-                'description': 'Enter: Bearer <token>'
+                'description': 'Enter: Bearer <JWT token>'
             }
         },
         'schemas': {
-            'Login': {
+            'User': {
+                'type': 'object',
+                'properties': {
+                    'username': {'type': 'string', 'example': 'user1', 'minLength': 3, 'maxLength': 50},
+                    'password': {'type': 'string', 'example': 'pass123', 'minLength': 6, 'format': 'password'},
+                    'role': {'type': 'string', 'example': 'user', 'enum': ['user', 'admin'], 'default': 'user'}
+                },
+                'required': ['username', 'password']
+            },
+            'LoginRequest': {
                 'type': 'object',
                 'properties': {
                     'username': {'type': 'string', 'example': 'user1'},
@@ -37,41 +54,37 @@ swagger_spec = {
                 },
                 'required': ['username', 'password']
             },
-            'Register': {
+            'TokenResponse': {
                 'type': 'object',
                 'properties': {
-                    'username': {'type': 'string', 'example': 'user1'},
-                    'password': {'type': 'string', 'example': 'pass123'},
-                    'role': {'type': 'string', 'example': 'user', 'default': 'user'}
+                    'access_token': {'type': 'string', 'example': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'},
+                    'refresh_token': {'type': 'string', 'example': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...', 'nullable': True}
                 },
-                'required': ['username', 'password']
-            },
-            'Token': {
-                'type': 'object',
-                'properties': {
-                    'access_token': {'type': 'string'},
-                    'refresh_token': {'type': 'string', 'nullable': True}
-                }
+                'required': ['access_token']
             },
             'ProtectedResponse': {
                 'type': 'object',
                 'properties': {
-                    'user': {'type': 'string'},
-                    'role': {'type': 'string'},
-                    'message': {'type': 'string'}
-                }
+                    'user': {'type': 'string', 'example': 'user1'},
+                    'role': {'type': 'string', 'example': 'user'},
+                    'message': {'type': 'string', 'example': 'Access granted to protected resource'}
+                },
+                'required': ['user', 'role', 'message']
             },
             'AdminResponse': {
                 'type': 'object',
                 'properties': {
-                    'message': {'type': 'string'}
-                }
+                    'message': {'type': 'string', 'example': 'Admin access granted'}
+                },
+                'required': ['message']
             },
-            'Error': {
+            'ErrorResponse': {
                 'type': 'object',
                 'properties': {
-                    'message': {'type': 'string'}
-                }
+                    'error': {'type': 'string', 'example': 'An error occurred'},
+                    'message': {'type': 'string', 'example': 'Detailed error message'}
+                },
+                'required': ['error']
             }
         }
     },
@@ -79,29 +92,38 @@ swagger_spec = {
         '/auth/register': {
             'post': {
                 'summary': 'Register a new user',
+                'description': 'Creates a new user account with the specified credentials and role',
                 'tags': ['Authentication'],
                 'requestBody': {
+                    'required': True,
                     'content': {
                         'application/json': {
-                            'schema': {'$ref': '#/components/schemas/Register'}
+                            'schema': {'$ref': '#/components/schemas/User'}
                         }
-                    },
-                    'required': True
+                    }
                 },
                 'responses': {
                     '201': {
-                        'description': 'User created',
+                        'description': 'User successfully created',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Token'}
+                                'schema': {'$ref': '#/components/schemas/TokenResponse'}
                             }
                         }
                     },
                     '400': {
-                        'description': 'Username exists',
+                        'description': 'Invalid input or username already exists',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
+                            }
+                        }
+                    },
+                    '500': {
+                        'description': 'Server error',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     }
@@ -110,22 +132,23 @@ swagger_spec = {
         },
         '/auth/login': {
             'post': {
-                'summary': 'Log in a user',
+                'summary': 'User login',
+                'description': 'Authenticates a user and returns access and refresh tokens',
                 'tags': ['Authentication'],
                 'requestBody': {
+                    'required': True,
                     'content': {
                         'application/json': {
-                            'schema': {'$ref': '#/components/schemas/Login'}
+                            'schema': {'$ref': '#/components/schemas/LoginRequest'}
                         }
-                    },
-                    'required': True
+                    }
                 },
                 'responses': {
                     '200': {
                         'description': 'Successful login',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Token'}
+                                'schema': {'$ref': '#/components/schemas/TokenResponse'}
                             }
                         }
                     },
@@ -133,7 +156,15 @@ swagger_spec = {
                         'description': 'Invalid credentials',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
+                            }
+                        }
+                    },
+                    '500': {
+                        'description': 'Server error',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     }
@@ -143,22 +174,31 @@ swagger_spec = {
         '/auth/refresh': {
             'post': {
                 'summary': 'Refresh access token',
+                'description': 'Generates a new access token using a valid refresh token',
                 'tags': ['Authentication'],
-                'security': [{'Bearer': []}],
+                'security': [{'BearerAuth': []}],
                 'responses': {
                     '200': {
-                        'description': 'Token refreshed',
+                        'description': 'Token successfully refreshed',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Token'}
+                                'schema': {'$ref': '#/components/schemas/TokenResponse'}
                             }
                         }
                     },
                     '401': {
-                        'description': 'Invalid refresh token',
+                        'description': 'Invalid or expired refresh token',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
+                            }
+                        }
+                    },
+                    '500': {
+                        'description': 'Server error',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     }
@@ -167,12 +207,13 @@ swagger_spec = {
         },
         '/protected/resource': {
             'get': {
-                'summary': 'Access a protected resource',
+                'summary': 'Access protected resource',
+                'description': 'Retrieves a protected resource available to authenticated users',
                 'tags': ['Protected'],
-                'security': [{'Bearer': []}],
+                'security': [{'BearerAuth': []}],
                 'responses': {
                     '200': {
-                        'description': 'Access granted',
+                        'description': 'Access granted to protected resource',
                         'content': {
                             'application/json': {
                                 'schema': {'$ref': '#/components/schemas/ProtectedResponse'}
@@ -180,10 +221,18 @@ swagger_spec = {
                         }
                     },
                     '401': {
-                        'description': 'Unauthorized',
+                        'description': 'Unauthorized access',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
+                            }
+                        }
+                    },
+                    '500': {
+                        'description': 'Server error',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     }
@@ -193,8 +242,9 @@ swagger_spec = {
         '/protected/admin': {
             'get': {
                 'summary': 'Access admin-only resource',
+                'description': 'Retrieves a resource only available to users with admin role',
                 'tags': ['Protected'],
-                'security': [{'Bearer': []}],
+                'security': [{'BearerAuth': []}],
                 'responses': {
                     '200': {
                         'description': 'Admin access granted',
@@ -205,18 +255,26 @@ swagger_spec = {
                         }
                     },
                     '401': {
-                        'description': 'Unauthorized',
+                        'description': 'Unauthorized access',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     },
                     '403': {
-                        'description': 'Forbidden',
+                        'description': 'Forbidden - insufficient permissions',
                         'content': {
                             'application/json': {
-                                'schema': {'$ref': '#/components/schemas/Error'}
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
+                            }
+                        }
+                    },
+                    '500': {
+                        'description': 'Server error',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ErrorResponse'}
                             }
                         }
                     }
@@ -226,8 +284,12 @@ swagger_spec = {
     }
 }
 
-# In generate_swagger.py
-with open('app/swagger.yaml', 'w') as f:
-    yaml.dump(swagger_spec, f, sort_keys=False)
-    
-print("Swagger file 'swagger.yaml' generated successfully.")
+# Ensure the app directory exists
+os.makedirs('app', exist_ok=True)
+
+# Save Swagger spec to file
+swagger_file = 'app/swagger.yaml'
+with open(swagger_file, 'w') as f:
+    yaml.dump(swagger_spec, f, sort_keys=False, allow_unicode=True)
+
+print(f"Swagger file '{swagger_file}' generated successfully.")

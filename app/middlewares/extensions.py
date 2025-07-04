@@ -10,7 +10,7 @@ jwt = JWTManager()
 bcrypt = Bcrypt()
 limiter = Limiter(
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=["200 per day", "50 per hour", "10 per minutes"],
     storage_uri="redis://localhost:6379",  
     strategy="moving-window",
 )
