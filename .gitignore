@@ -23,11 +23,10 @@ env/
 # Python cache
 *.pyc
 
-# Database files
-*.sqlite3
 
 # Other
 instance/
 venv/
 *.pyc
 .env
+.flaskenv
