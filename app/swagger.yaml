@@ -25,10 +25,12 @@ servers:
 components:
   securitySchemes:
     BearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
+      type: apiKey
+      in: header
+      name: Authorization
       description: 'Enter: Bearer <JWT token>'
+security:
+- BearerAuth: []
   schemas:
     User:
       type: object

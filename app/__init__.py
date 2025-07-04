@@ -1,125 +1,117 @@
 import os
 import redis
-from flask import Flask
+import logging
+from flask import Flask, request
 from flask_restx import Api
-from flask_jwt_extended import JWTManager
-from mongoengine import connect
 from flasgger import Swagger
+from mongoengine import connect
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 from .dbconfigs import Config
+from .middlewares.extensions import cache, jwt, bcrypt, limiter
 from .middlewares.globalHandler import GlobalHandler
 from app.api.auth import auth_ns
 from app.api.protected import protected_ns
-from .middlewares.extensions import cache, jwt, bcrypt, limiter
 from .routes import admin_bp, register_admin_namespace
 
-jwt = JWTManager()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
-    app.register_blueprint(admin_bp)
 
+    # -------------------
+    # CORS
+    # -------------------
+    CORS(app, resources={r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Authorization", "Content-Type"]
+    }})
 
-    # Test Redis connection
-    try:
-        app.config['SESSION_TYPE'] = 'redis'
-        app.config['SESSION_REDIS'] = app.config['CACHE_REDIS_URL']
-        redis_client = redis.Redis.from_url(
-            app.config['SESSION_REDIS'], decode_responses=True
-        )
-        redis_client.ping()
-        app.logger.info("Redis Cloud connection successful")
-    except redis.exceptions.ConnectionError as e:
-        app.logger.error(f"Redis Cloud connection failed: {str(e)}. Falling back to null cache.")
-        app.config['CACHE_TYPE'] = 'null'
-
-    
-   # Initialize MongoDB
+    # -------------------
+    # Database Connection
+    # -------------------
     try:
         connect(host=app.config['MONGO_URI'])
-        app.logger.info("MongoDB connection successful")
+        logger.info("MongoDB connection successful.")
     except Exception as e:
-        app.logger.error(f"MongoDB connection failed: {str(e)}")
+        logger.error(f"MongoDB connection failed: {e}", exc_info=True)
         raise
+
+    # -------------------
+    # Redis Connection
+    # -------------------
+    try:
+        redis_client = redis.Redis.from_url(app.config['CACHE_REDIS_URL'], decode_responses=True)
+        redis_client.ping()
+        app.config['SESSION_REDIS'] = redis_client
+        logger.info("Redis connection successful.")
+    except redis.exceptions.ConnectionError as e:
+        logger.error(f"Redis connection failed: {e}. Falling back to null cache.", exc_info=True)
+        app.config['CACHE_TYPE'] = 'null'
+
+    # -------------------
+    # Extensions Init
+    # -------------------
+    cache.init_app(app)
+    jwt.init_app(app)
+    bcrypt.init_app(app)
+    limiter.init_app(app)
+    logger.info("Flask extensions initialized (Cache, JWT, Bcrypt, Limiter).")
+
     
-    # Initialize extensions
-    # Initialize Cache
-    try:
-        cache.init_app(app)
-        app.logger.info("Cache initialized successfully.")
-    except Exception as e:
-        app.logger.error(f"Failed to initialize Cache: {e}", exc_info=True)
+    # -------------------
+    # Flask-RestX API with Security
+    # -------------------
+    authorizations = {
+        'BearerAuth': {
+            'type': 'apiKey',
+            'in': 'header',
+            'name': 'Authorization',
+            'description': 'Enter: Bearer <JWT token>'
+        }
+    }
 
-    # Initialize JWT
-    try:
-        jwt.init_app(app)
-        app.logger.info("JWT Manager initialized successfully.")
-    except Exception as e:
-        app.logger.error(f"Failed to initialize JWT Manager: {e}", exc_info=True)
-
-    # Initialize Bcrypt
-    try:
-        bcrypt.init_app(app)
-        app.logger.info("Bcrypt initialized successfully.")
-    except Exception as e:
-        app.logger.error(f"Failed to initialize Bcrypt: {e}", exc_info=True)
-
-
-    try:
-        limiter.init_app(app)
-        app.logger.info("Rate Limiter initialized successfully.")
-    except Exception as e:
-        app.logger.error(f"Failed to initialize Rate Limiter: {e}", exc_info=True)
-   
-
-     # Initialize Flask-RESTX API
     api = Api(
         app,
-        title='Flask JWT API with MongoDB and Redis',
-        description='A scalable Flask API with JWT authentication, MongoDB, Redis, and Swagger docs',
-        version='1.0.0',
-        security='BearerAuth',
-        authorizations={
-            'BearerAuth': {
-                'type': 'apiKey',
-                'in': 'header',
-                'name': 'Authorization',
-                'description': 'Enter: Bearer <JWT token>'
-            }
-        },
-        doc='/docs/' 
+        doc='/docs/',
+        title='Flask JWT API',
+        version='1.0',
+        description='A scalable API with JWT, MongoDB, and Redis',
+        authorizations=authorizations,
+        security='BearerAuth'
     )
 
-    register_admin_namespace(api) 
-    
-    # Flasgger swagger config:
-    swagger_config = {
-        "headers": [],
-        "specs": [
-            {
-                "endpoint": "apispec",
-                "route": "/docs/apispec.json",
-                "rule_filter": lambda rule: True,
-                "model_filter": lambda tag: True,
-            }
-        ],
-        "static_url_path": "/flasgger_static",
-        "swagger_ui": True,
-        "specs_route": "/docs/"
-    }
-    
-    swagger_template_path = os.path.join(os.path.dirname(__file__), 'swagger.yaml')
-
-    swagger = Swagger(app, template_file=swagger_template_path, config=swagger_config)
-
-  
+    # -------------------
+    # Register Blueprints & Namespaces
+    # -------------------
+    app.register_blueprint(admin_bp)
     api.add_namespace(auth_ns, path='/auth')
     api.add_namespace(protected_ns, path='/protected')
-    
+    register_admin_namespace(api)
+
+    # -------------------
+    # Flasgger Swagger Integration (Optional)
+    # -------------------
+    swagger_template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'swagger.yml')
+    if os.path.exists(swagger_template_path):
+        try:
+            Swagger(app, template_file=swagger_template_path)
+            logger.info("Flasgger initialized with external swagger.yml.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Flasgger: {e}", exc_info=True)
+
+    # -------------------
+    # Global Handler
+    # -------------------
     try:
         app.config.from_object(GlobalHandler)
-        app.logger.info("GlobalHandler config loaded successfully")
+        logger.info("GlobalHandler config loaded successfully.")
     except Exception as e:
-        app.logger.error(f"Failed to load GlobalHandler config: {e}", exc_info=True)
+        logger.error(f"Failed to load GlobalHandler config: {e}", exc_info=True)
 
     return app

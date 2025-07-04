@@ -1,11 +1,15 @@
-import redis
-from mongoengine.errors import NotUniqueError
-from app.middlewares.extensions import cache
+from ..middlewares.extensions import cache
 from ..models.user import User
+from mongoengine.errors import NotUniqueError
+import logging
+from flask_caching.backends.rediscache import RedisCache
+
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     @staticmethod
-    @cache.memoize(timeout=300)  # Cache user lookup for 5 minutes in Redis
+    @cache.memoize(timeout=300)
     def get_user_by_username(username):
         return User.objects(username=username).first()
     
@@ -15,7 +19,6 @@ class UserService:
             user = User(username=username, role=role)
             user.set_password(password)
             user.save()
-            # Invalidate cache for this username after creation
             cache.delete_memoized(UserService.get_user_by_username, username)
             return user
         except NotUniqueError:
@@ -23,31 +26,41 @@ class UserService:
     
     @staticmethod
     def increment_login_attempt(username):
-        redis_client: redis.Redis = cache.cache._client  
-        key = f"login_attempts:{username}"
-        attempts = redis_client.incr(key)
-        if attempts == 1:
-            redis_client.expire(key, 3600)  
-        return attempts
-
+        try:
+            key = f"login_attempts:{username}"
+            if isinstance(cache.cache, RedisCache):
+                attempts = cache.cache.incr(key)
+                if attempts == 1:
+                    cache.set(key, attempts, timeout=3600)
+                return attempts
+            else:
+                logger.warning("Cache backend is not Redis. Skipping login attempt tracking.")
+                return 0
+        except Exception as e:
+            logger.error(f"Failed to increment login attempts: {str(e)}", exc_info=True)
+            return 0
+        
     @staticmethod
     def reset_login_attempt(username):
-        redis_client: redis.Redis = cache.cache._client
-        key = f"login_attempts:{username}"
-        redis_client.delete(key)
-
+        try:
+            key = f"login_attempts:{username}"
+            if hasattr(cache, 'incr'):
+                cache.delete(key)
+        except Exception as e:
+            logger.error(f"Failed to reset login attempts: {str(e)}", exc_info=True)
+    
     @staticmethod
     def authenticate(username, password):
-        # Check login attempts before authenticating
-        attempts = UserService.increment_login_attempt(username)
-        max_attempts = 5
-        if attempts > max_attempts:
-            raise ValueError("Too many login attempts, please try again later.")
-
-        user = UserService.get_user_by_username(username)
-        if user and user.check_password(password):
-            # Reset login attempts on successful login
-            UserService.reset_login_attempt(username)
-            return user
-
-        return None
+        try:
+            attempts = UserService.increment_login_attempt(username)
+            max_attempts = 5
+            if attempts > max_attempts:
+                raise ValueError("Too many login attempts, please try again later.")
+            user = UserService.get_user_by_username(username)
+            if user and user.check_password(password):
+                UserService.reset_login_attempt(username)
+                return user
+            return None
+        except Exception as e:
+            logger.error(f"Authentication error: {str(e)}", exc_info=True)
+            raise
