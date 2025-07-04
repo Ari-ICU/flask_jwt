@@ -71,10 +71,12 @@ API Endpoints:
 
 License:
 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
 MIT License
 
 ---
 
 Author:
 
-Your Name - thoeurn.ratha.kh@gmail.com
+thoeurn ratha - thoeurn.ratha.kh@gmail.com
