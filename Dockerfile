@@ -20,4 +20,4 @@ COPY . /app
 
 ENV FLASK_APP=run.py
 
-CMD ["flask", "run", "--host=0.0.0.0", "--port=8080"]
+CMD ["flask", "run"]
