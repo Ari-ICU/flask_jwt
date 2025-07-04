@@ -1,0 +1,233 @@
+import yaml
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env and .flaskenv
+load_dotenv()
+
+# Define the Swagger/OpenAPI specification
+swagger_spec = {
+    'openapi': '3.0.3',
+    'info': {
+        'title': 'Flask JWT API with MongoDB',
+        'description': 'A scalable Flask API with JWT authentication, Swagger documentation, and MongoDB',
+        'version': '1.0.0'
+    },
+    'servers': [
+        {
+            'url': os.getenv('API_BASE_URL', 'http://localhost:5000'),
+            'description': 'Development server'
+        }
+    ],
+    'components': {
+        'securitySchemes': {
+            'Bearer': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+                'description': 'Enter: Bearer <token>'
+            }
+        },
+        'schemas': {
+            'Login': {
+                'type': 'object',
+                'properties': {
+                    'username': {'type': 'string', 'example': 'user1'},
+                    'password': {'type': 'string', 'example': 'pass123'}
+                },
+                'required': ['username', 'password']
+            },
+            'Register': {
+                'type': 'object',
+                'properties': {
+                    'username': {'type': 'string', 'example': 'user1'},
+                    'password': {'type': 'string', 'example': 'pass123'},
+                    'role': {'type': 'string', 'example': 'user', 'default': 'user'}
+                },
+                'required': ['username', 'password']
+            },
+            'Token': {
+                'type': 'object',
+                'properties': {
+                    'access_token': {'type': 'string'},
+                    'refresh_token': {'type': 'string', 'nullable': True}
+                }
+            },
+            'ProtectedResponse': {
+                'type': 'object',
+                'properties': {
+                    'user': {'type': 'string'},
+                    'role': {'type': 'string'},
+                    'message': {'type': 'string'}
+                }
+            },
+            'AdminResponse': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'}
+                }
+            },
+            'Error': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string'}
+                }
+            }
+        }
+    },
+    'paths': {
+        '/auth/register': {
+            'post': {
+                'summary': 'Register a new user',
+                'tags': ['Authentication'],
+                'requestBody': {
+                    'content': {
+                        'application/json': {
+                            'schema': {'$ref': '#/components/schemas/Register'}
+                        }
+                    },
+                    'required': True
+                },
+                'responses': {
+                    '201': {
+                        'description': 'User created',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Token'}
+                            }
+                        }
+                    },
+                    '400': {
+                        'description': 'Username exists',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/auth/login': {
+            'post': {
+                'summary': 'Log in a user',
+                'tags': ['Authentication'],
+                'requestBody': {
+                    'content': {
+                        'application/json': {
+                            'schema': {'$ref': '#/components/schemas/Login'}
+                        }
+                    },
+                    'required': True
+                },
+                'responses': {
+                    '200': {
+                        'description': 'Successful login',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Token'}
+                            }
+                        }
+                    },
+                    '401': {
+                        'description': 'Invalid credentials',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/auth/refresh': {
+            'post': {
+                'summary': 'Refresh access token',
+                'tags': ['Authentication'],
+                'security': [{'Bearer': []}],
+                'responses': {
+                    '200': {
+                        'description': 'Token refreshed',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Token'}
+                            }
+                        }
+                    },
+                    '401': {
+                        'description': 'Invalid refresh token',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/protected/resource': {
+            'get': {
+                'summary': 'Access a protected resource',
+                'tags': ['Protected'],
+                'security': [{'Bearer': []}],
+                'responses': {
+                    '200': {
+                        'description': 'Access granted',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ProtectedResponse'}
+                            }
+                        }
+                    },
+                    '401': {
+                        'description': 'Unauthorized',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        '/protected/admin': {
+            'get': {
+                'summary': 'Access admin-only resource',
+                'tags': ['Protected'],
+                'security': [{'Bearer': []}],
+                'responses': {
+                    '200': {
+                        'description': 'Admin access granted',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/AdminResponse'}
+                            }
+                        }
+                    },
+                    '401': {
+                        'description': 'Unauthorized',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    },
+                    '403': {
+                        'description': 'Forbidden',
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/Error'}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+# In generate_swagger.py
+with open('app/swagger.yaml', 'w') as f:
+    yaml.dump(swagger_spec, f, sort_keys=False)
+    
+print("Swagger file 'swagger.yaml' generated successfully.")
