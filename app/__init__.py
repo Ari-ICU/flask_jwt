@@ -86,6 +86,8 @@ def create_app():
         security='BearerAuth'
     )
 
+    
+
     # -------------------
     # Register Blueprints & Namespaces
     # -------------------
